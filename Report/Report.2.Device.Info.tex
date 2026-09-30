@@ -1,0 +1,48 @@
+\documentclass[11pt,a4paper]{article}
+\usepackage[a4paper,margin=2.4cm]{geometry}
+\usepackage{graphicx}
+\usepackage{float}
+
+\title{Labwork 2}
+\author{Pham Tien Nhat \\ Student ID: 2540090 \\ Advanced HPC -- USTH}
+\date{\today}
+
+\begin{document}
+\maketitle
+
+\section{Device Name}
+\texttt{cuda.detect()} finds the supported GPU; \texttt{cuda.select\_device(0)}
+selects it. Device is: NVIDIA GeForce RTX 3050 Laptop GPU.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.7\textwidth]{../../screenshots/lab2/1.png}
+\caption{\texttt{cuda.detect()} showing the CUDA device.}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.55\textwidth]{../../screenshots/lab2/2.png}
+\caption{\texttt{cuda.select\_device(0)} returning device id and name.}
+\end{figure}
+
+\section{Core Info}
+Compute capability 8.6 (Ampere), 16 multiprocessors.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.55\textwidth]{../../screenshots/lab2/3.png}
+\caption{Compute capability and multiprocessor count from device.}
+\end{figure}
+
+\section{Memory Info}
+\texttt{get\_memory\_info()} reports free and total device memory in bytes.
+
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.6\textwidth]{../../screenshots/lab2/4.png}
+\caption{Free and total memory returned by \texttt{get\_memory\_info()}.}
+\end{figure}
+
+\end{document}
