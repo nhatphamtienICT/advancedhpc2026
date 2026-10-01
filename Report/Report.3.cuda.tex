@@ -1,0 +1,104 @@
+\documentclass[11pt,a4paper]{article}
+\usepackage[a4paper,margin=2.4cm]{geometry}
+\usepackage{graphicx}
+\usepackage{float}
+
+\title{Labwork 3}
+\author{Pham Tien Nhat \\ Student ID: 2540090 \\ Advanced HPC -- USTH}
+\date{\today}
+
+\begin{document}
+\maketitle
+
+\section{Loading the Image}
+\texttt{pixelSum} $= h \times w = 306240$.
+
+\begin{verbatim}
+import matplotlib.pyplot as plt
+
+image = plt.imread('../../image/images.jpeg')
+plt.imshow(image)
+h ,w ,d = image.shape
+
+pixelSum = h * w
+\end{verbatim}
+
+\section{Flatten}
+The image is flattened into a 1D array of RGB pixels.
+
+\begin{verbatim}
+flatten = image.reshape(pixelSum,3)
+\end{verbatim}
+
+\section{Grayscale on CPU}
+A \texttt{for} loop computes $g = (R+G+B)/3$ per pixel.
+
+\begin{verbatim}
+import numpy as np
+import time 
+grayCPU = np.zeros(pixelSum, np.uint8)
+start = time.time()
+for i in range(pixelSum):
+    grayCPU[i] = np.uint8((int(flatten[i, 0]) + int(flatten[i, 1])
+                          + int(flatten[i, 2])) / 3)
+end = time.time() - start
+print(end)
+plt.imshow(grayCPU.reshape(h, w), cmap='gray')
+\end{verbatim}
+
+\section{Grayscale on GPU}
+
+\begin{verbatim}
+@cuda.jit
+def grayscale(src, dst):
+    tidx = cuda.threadIdx.x + cuda.blockIdx.x * cuda.blockDim.x
+    if tidx >= src.shape[0]:
+        return
+    g = np.uint8((src[tidx, 0] + src[tidx, 1] + src[tidx, 2]) / 3)
+    dst[tidx, 0] = dst[tidx, 1] = dst[tidx, 2] = g
+\end{verbatim}
+
+The host copies data from GPU to the device, launches the kernel and copies the result
+back.
+
+\begin{verbatim}
+blockSize = 64
+gridSize = (pixelSum + blockSize - 1) // blockSize
+start_gpu = time.time()
+devSrc = cuda.to_device(flatten)
+devDst = cuda.device_array((pixelSum, 3), np.uint8)
+grayscale[gridSize, blockSize](devSrc, devDst)
+hostDst = devDst.copy_to_host()
+end_gpu = time.time() - start_gpu
+print(end_gpu)
+plt.imshow(hostDst.reshape(h, w, 3))
+\end{verbatim}
+
+\section{Block Size vs Time}
+The kernel is timed for block sizes $2^5$ to $2^{10}$.
+
+\begin{verbatim}
+blockSizes = [32, 64, 128, 256, 512, 1024]
+times = []
+grayscale[(pixelSum + 63) // 64, 64](devSrc, devDst) 
+for blockSize in blockSizes:
+    gridSize = (pixelSum + blockSize - 1) // blockSize
+    start = time.time()
+    for i in range(100):
+        grayscale[gridSize, blockSize](devSrc, devDst)
+    cuda.synchronize()
+    times.append((time.time() - start) / 100)
+plt.plot(blockSizes, times, marker='o')
+plt.xscale('log', base=2)
+plt.xlabel('block size')
+plt.ylabel('time')
+plt.show()
+\end{verbatim}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.7\textwidth]{../../image/image.png}
+\caption{Block size vs kernel time (seconds).}
+\end{figure}
+
+\end{document}
