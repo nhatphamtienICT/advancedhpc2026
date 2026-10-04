@@ -1,0 +1,163 @@
+\documentclass{article}
+\usepackage[a4paper,margin=2.4cm]{geometry}
+\usepackage{graphicx}
+\usepackage{float}
+\usepackage{fancyvrb}
+\fvset{frame=single,fontsize=\small,framesep=3mm}
+
+\title{Labwork 8: Scatter}
+\author{Pham Tien Nhat}
+\date{\today}
+
+\begin{document}
+
+\maketitle
+
+\section{Implementation}
+
+The input image of this labwork is stored as an Array of Struct (AoS) where each pixel keeps its R, G and B values together. In Labwork 8 I have converted the input image to HSV as a Struct of Array (SoA), with 3 different arrays $H[\,]$, $S[\,]$ and $V[\,]$, then I have also converted the HSV image version back to RGB original image.
+
+\begin{Verbatim}
+import math
+import time
+import numpy as np
+import matplotlib.pyplot as plt
+
+image = plt.imread('1.jpeg')
+plt.imshow(image)
+h, w, d = image.shape
+\end{Verbatim}
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.6\textwidth]{../../image/lab8_input.png}
+\caption{Input image.}
+\label{figin}
+\end{figure}
+
+\textbf{RGB to HSV Conversion:} Each thread reads one pixel, scales R, G, B from $[0..255]$ to $[0..1]$, and finds $max$, $min$ and $\Delta = max - min$ following the formula given in the slide. The hue $H \in [0, 360]$ depends on which channel is the maximum, the saturation is $S = \Delta / max$ (0 if $max = 0$) and the value is $V = max$. The kernel is a scatter: one input pixel $(R, G, B)$ is written to 3 different output arrays.
+
+\begin{Verbatim}
+@cuda.jit
+def RGB2HSV(src, H, S, V):
+    tidx = cuda.threadIdx.x + cuda.blockIdx.x * cuda.blockDim.x
+    tidy = cuda.threadIdx.y + cuda.blockIdx.y * cuda.blockDim.y
+    if tidx >= src.shape[1] or tidy >= src.shape[0]:
+        return
+
+    r = src[tidy, tidx, 0] / 255
+    g = src[tidy, tidx, 1] / 255
+    b = src[tidy, tidx, 2] / 255
+    mx = max(r, g, b)
+    mn = min(r, g, b)
+    delta = mx - mn
+
+    # H conversion
+    if delta == 0:
+        hue = 0.0
+    elif mx == r:
+        hue = 60 * (((g - b) / delta) % 6)
+    elif mx == g:
+        hue = 60 * ((b - r) / delta + 2)
+    else:
+        hue = 60 * ((r - g) / delta + 4)
+
+    # S conversion
+    if mx == 0:
+        sat = 0.0
+    else:
+        sat = delta / mx
+
+    # scatter: one pixel (R, G, B) goes to 3 different arrays
+    H[tidy, tidx] = hue
+    S[tidy, tidx] = sat
+    V[tidy, tidx] = mx
+
+blockSize = (32, 32)
+gridSize = (math.ceil(w / blockSize[0]), math.ceil(h / blockSize[1]))
+devSrc = cuda.to_device(image)
+devH = cuda.device_array((h, w), np.float32)
+devS = cuda.device_array((h, w), np.float32)
+devV = cuda.device_array((h, w), np.float32)
+RGB2HSV[gridSize, blockSize](devSrc, devH, devS, devV)
+\end{Verbatim}
+
+The output of HSV process is display in the figure below, with three images each represents a channel from HSV, where $H$ represents the color changes, value is between 0 to 360, $S$ shows the colorfulness, value lies within 0 and 1 and $V$ displays the brightness, value ranging from 0 to 1
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=\textwidth]{../../image/lab8_hsv.png}
+\caption{The 3 output arrays $H$, $S$ and $V$.}
+\label{fighsv}
+\end{figure}
+
+\textbf{HSV to RGB Conversion:} The kernel reads the 3 arrays $H$, $S$, $V$ and writes one RGB image.
+
+\begin{Verbatim}
+@cuda.jit
+def HSV2RGB(src, dst, H, S, V):
+    tidx = cuda.threadIdx.x + cuda.blockIdx.x * cuda.blockDim.x
+    tidy = cuda.threadIdx.y + cuda.blockIdx.y * cuda.blockDim.y
+    if tidx >= src.shape[1] or tidy >= src.shape[0]:
+        return
+
+    # Preparation
+    d = H[tidy, tidx] / 60
+    hi = int(d) % 6
+    f = d - hi
+    l = V[tidy, tidx] * (1 - S[tidy, tidx])
+    m = V[tidy, tidx] * (1 - f * S[tidy, tidx])
+    n = V[tidy, tidx] * (1 - (1 - f) * S[tidy, tidx])
+
+    # Conversion
+    if 0 <= H[tidy, tidx] < 60:
+        R = V[tidy, tidx]
+        G = n
+        B = l
+    elif 60 <= H[tidy, tidx] < 120:
+        R = m
+        G = V[tidy, tidx]
+        B = l
+    elif 120 <= H[tidy, tidx] < 180:
+        R = l
+        G = V[tidy, tidx]
+        B = n
+    elif 180 <= H[tidy, tidx] < 240:
+        R = l
+        G = m
+        B = V[tidy, tidx]
+    elif 240 <= H[tidy, tidx] < 300:
+        R = n
+        G = l
+        B = V[tidy, tidx]
+    else:
+        R = V[tidy, tidx]
+        G = l
+        B = m
+    R = R * 255
+    G = G * 255
+    B = B * 255
+
+    dst[tidy, tidx, 0] = R
+    dst[tidy, tidx, 1] = G
+    dst[tidy, tidx, 2] = B
+
+devDst = cuda.device_array((h, w, 3), np.uint8)
+HSV2RGB[gridSize, blockSize](devSrc, devDst, devH, devS, devV)
+result = devDst.copy_to_host()
+\end{Verbatim}
+
+
+\section{Experimental Results}
+
+Figure~\ref{figrgb} compares the input image with the output after RGB to HSV and RGB conversions.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.9\textwidth]{../../image/lab8_rgb.png}
+\caption{Input image (left) and output after RGB $\rightarrow$ HSV $\rightarrow$ RGB (right).}
+\label{figrgb}
+\end{figure}
+
+The two images look similar to each other after the conversions step.
+
+\end{document}
